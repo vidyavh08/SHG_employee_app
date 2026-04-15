@@ -16,6 +16,9 @@ dependencies:
   # HTTP for API calls
   http: ^1.6.0
 
+  # Environment variables
+  flutter_dotenv: ^5.1.0
+
   # Local storage
   shared_preferences: ^2.2.2
 
@@ -33,6 +36,7 @@ dependencies:
   connectivity_plus: ^5.0.2
 
   cupertino_icons: ^1.0.6
+  http_parser: ^4.1.2
 
 dev_dependencies:
   flutter_test:
@@ -56,5 +60,6 @@ flutter:
   #       - asset: assets/fonts/Inter-ExtraBold.ttf
   #         weight: 800
 
-  # assets:
+  assets:
+    - .env
   #   - assets/images/
