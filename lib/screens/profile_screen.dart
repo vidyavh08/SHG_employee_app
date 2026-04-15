@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
+import '../services/auth_session.dart';
 import 'login_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -68,8 +69,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context); // close dialog
+              await AuthSession.instance.clear();
+              if (!mounted) return;
               Navigator.of(context).pushAndRemoveUntil(
                 MaterialPageRoute(builder: (context) => const LoginScreen()),
                 (route) => false, // remove all previous routes

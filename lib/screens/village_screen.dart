@@ -1,6 +1,5 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import '../services/village_api.dart';
 import '../theme/app_theme.dart';
 
 class VillageScreen extends StatefulWidget {
@@ -16,12 +15,7 @@ class _VillageScreenState extends State<VillageScreen> {
   List<Map<String, String>> _approvedVillages = [];
   bool _showPending = true;
 
-  // Fineract default headers
-  final Map<String, String> _apiHeaders = {
-    'Fineract-Platform-TenantId': 'default',
-    'Content-Type': 'application/json',
-    'Authorization': 'Basic YWRtaW46cGFzc3dvcmQ=',
-  };
+  final VillageApi _villageApi = VillageApi();
 
   @override
   void initState() {
@@ -32,28 +26,21 @@ class _VillageScreenState extends State<VillageScreen> {
   Future<void> _fetchVillages() async {
     setState(() => _isLoading = true);
     try {
-      final url = Uri.parse('https://192.168.0.94/fineract-provider/api/v1/villages?offset=0&limit=10&sortOrder=&orderBy=&paged=true');
-      final response = await http.get(url, headers: _apiHeaders);
-      
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        final decoded = jsonDecode(response.body);
-        final List items = decoded['pageItems'] ?? decoded ?? [];
-        
-        setState(() {
-          _pendingVillages = items.map<Map<String, String>>((item) {
-            return {
-              'id': item['id']?.toString() ?? item['name']?.toString() ?? 'temp_id',
-              'name': item['name']?.toString() ?? item['villageName']?.toString() ?? 'Unknown',
-              'population': item['population']?.toString() ?? 'N/A',
-              'distance': item['distanceFromPanchayat']?.toString() != null 
-                  ? '${item['distanceFromPanchayat']} km' : 'N/A',
-              'network': item['networkFacility']?.toString() ?? 'N/A',
-            };
-          }).toList();
-          // Clear approved villages or map from your database status here
-          _approvedVillages.clear(); 
-        });
-      }
+      final items = await _villageApi.fetchVillages();
+
+      setState(() {
+        _pendingVillages = items.map<Map<String, String>>((item) {
+          return {
+            'id': item['id']?.toString() ?? item['name']?.toString() ?? 'temp_id',
+            'name': item['name']?.toString() ?? item['villageName']?.toString() ?? 'Unknown',
+            'population': item['population']?.toString() ?? 'N/A',
+            'distance': item['distanceFromPanchayat']?.toString() != null
+                ? '${item['distanceFromPanchayat']} km' : 'N/A',
+            'network': item['networkFacility']?.toString() ?? 'N/A',
+          };
+        }).toList();
+        _approvedVillages.clear();
+      });
     } catch (e) {
       debugPrint('Error loading villages from API: $e');
       if (_pendingVillages.isEmpty && _approvedVillages.isEmpty && mounted) {
@@ -74,10 +61,13 @@ class _VillageScreenState extends State<VillageScreen> {
 
   Future<void> _approveVillage(Map<String, String> village) async {
     setState(() => _isLoading = true);
-    
-    // Simulate an approval API hit
-    await Future.delayed(const Duration(seconds: 1));
-    
+
+    try {
+      await _villageApi.approveVillage(village['id'] ?? '');
+    } catch (e) {
+      debugPrint('Error approving village: $e');
+    }
+
     if (mounted) {
       setState(() {
         _pendingVillages.removeWhere((v) => v['id'] == village['id']);

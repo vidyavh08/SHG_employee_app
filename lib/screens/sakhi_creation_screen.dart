@@ -1,9 +1,8 @@
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import '../services/sakhi_api.dart';
 import '../theme/app_theme.dart';
 
 class SakhiCreationScreen extends StatefulWidget {
@@ -23,7 +22,6 @@ class _SakhiCreationScreenState extends State<SakhiCreationScreen> with SingleTi
   // Enrollment Form State
   final _formKey = GlobalKey<FormState>();
 
-  final _branchNameController = TextEditingController(text: "Main Branch");
   final _sakhiNameController = TextEditingController();
   final _dobController = TextEditingController();
   final _mobileController = TextEditingController();
@@ -34,8 +32,12 @@ class _SakhiCreationScreenState extends State<SakhiCreationScreen> with SingleTi
   final _monthlyIncomeController = TextEditingController();
   final _spouseMobileController = TextEditingController();
 
-  int _occupation = 37;
-  int _spouseOccupation = 37;
+  int? _selectedOfficeId;
+  int? _occupationId;
+  int? _spouseOccupationId;
+
+  List<dynamic> _offices = [];
+  List<dynamic> _professions = [];
 
   bool _isLoading = false;
   bool _isPanVerifying = false;
@@ -47,18 +49,19 @@ class _SakhiCreationScreenState extends State<SakhiCreationScreen> with SingleTi
   File? _panPhoto;
 
   final ImagePicker _picker = ImagePicker();
+  final SakhiApi _sakhiApi = SakhiApi();
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _fetchSakhis();
+    _loadTemplateData();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
-    _branchNameController.dispose();
     _sakhiNameController.dispose();
     _dobController.dispose();
     _mobileController.dispose();
@@ -74,25 +77,23 @@ class _SakhiCreationScreenState extends State<SakhiCreationScreen> with SingleTi
   Future<void> _fetchSakhis() async {
     setState(() => _isLoadingSakhis = true);
     try {
-      final url = Uri.parse('https://localhost/fineract-provider/api/v1/sakhi');
-      final response = await http.get(url, headers: {
-        'Fineract-Platform-TenantId': 'default',
-        'Content-Type': 'application/json',
-        'Authorization': 'Basic YWRtaW46cGFzc3dvcmQ=',
-      });
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        final decoded = jsonDecode(response.body);
-        final List items = decoded['pageItems'] ?? decoded ?? [];
-        setState(() {
-          _sakhis = items.map<Map<String, String>>((item) => {
+      final items = await _sakhiApi.fetchSakhis();
+      setState(() {
+        _sakhis = items.map<Map<String, String>>((item) {
+          final statusEnum = item['statusEnum'];
+          String status = 'Active';
+          if (statusEnum == 100) status = 'Pending';
+          if (statusEnum == 200) status = 'Active';
+          
+          return {
             'id': item['resourceId']?.toString() ?? item['id']?.toString() ?? 'N/A',
             'name': item['sakhiName']?.toString() ?? 'Unknown',
             'mobile': item['mobileNumber']?.toString() ?? 'N/A',
-            'branch': item['branchName']?.toString() ?? 'Main Branch',
-            'status': 'Active', 
-          }).toList();
-        });
-      }
+            'branch': item['officeName']?.toString() ?? item['branchName']?.toString() ?? 'Main Branch',
+            'status': status,
+          };
+        }).toList();
+      });
     } catch (e) {
       debugPrint('Error loading sakhis: $e');
       if (_sakhis.isEmpty && mounted) {
@@ -105,6 +106,29 @@ class _SakhiCreationScreenState extends State<SakhiCreationScreen> with SingleTi
       }
     } finally {
       if (mounted) setState(() => _isLoadingSakhis = false);
+    }
+  }
+
+  Future<void> _loadTemplateData() async {
+    try {
+      final offices = await _sakhiApi.fetchOffices();
+      final template = await _sakhiApi.fetchSakhiTemplate();
+      
+      if (mounted) {
+        setState(() {
+          _offices = offices;
+          _professions = template['professionOptions'] ?? [];
+          
+          // Set defaults if available
+          if (_offices.isNotEmpty) _selectedOfficeId = _offices[0]['id'];
+          if (_professions.isNotEmpty) {
+            _occupationId = _professions[0]['id'];
+            _spouseOccupationId = _professions[0]['id'];
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading template data: $e');
     }
   }
 
@@ -205,24 +229,6 @@ class _SakhiCreationScreenState extends State<SakhiCreationScreen> with SingleTi
     );
   }
 
-  Future<void> _uploadDocument(File file, String urlString) async {
-    try {
-      final request = http.MultipartRequest('POST', Uri.parse(urlString));
-      request.headers.addAll({
-        'Fineract-Platform-TenantId': 'default',
-        'Authorization': 'Basic YWRtaW46cGFzc3dvcmQ=',
-      });
-      request.files.add(await http.MultipartFile.fromPath('file', file.path));
-      
-      final response = await request.send();
-      if (response.statusCode >= 400) {
-        debugPrint("Failed to upload image $urlString: ${response.statusCode}");
-      }
-    } catch (e) {
-      debugPrint("Error uploading image $urlString: $e");
-    }
-  }
-
   Future<void> _submitForm() async {
     if (!_formKey.currentState!.validate()) return;
     if (_sakhiPhoto == null) {
@@ -232,26 +238,16 @@ class _SakhiCreationScreenState extends State<SakhiCreationScreen> with SingleTi
 
     setState(() => _isLoading = true);
 
-    final url = Uri.parse('https://localhost/fineract-provider/api/v1/sakhi');
-    final headers = {
-      'Fineract-Platform-TenantId': 'default',
-      'Content-Type': 'application/json',
-      'Authorization': 'Basic YWRtaW46cGFzc3dvcmQ=',
-    };
-
     final payload = {
-      "branchName": _branchNameController.text.trim(),
-      "image": _sakhiPhoto?.path ?? "3243", 
+      "officeId": _selectedOfficeId,
       "sakhiName": _sakhiNameController.text.trim(),
       "dob": _dobController.text.trim(),
       "mobileNumber": _mobileController.text.trim(),
       "aadharNo": _aadharNoController.text.trim(),
-      "aadharImage": _aadharPhoto?.path ?? "1234", 
       "panNo": _panNoController.text.trim(),
-      "panImage": _panPhoto?.path ?? "1223", 
       "spouseName": _spouseNameController.text.trim(),
-      "spouseOccupation": _spouseOccupation,
-      "occupation": _occupation,
+      "spouseOccupation": _spouseOccupationId,
+      "occupation": _occupationId,
       "address": _addressController.text.trim(),
       "monthlyIncome": _monthlyIncomeController.text.trim(),
       "spouseMobile": _spouseMobileController.text.trim(),
@@ -260,53 +256,39 @@ class _SakhiCreationScreenState extends State<SakhiCreationScreen> with SingleTi
     };
 
     try {
-      final response = await http.post(url, headers: headers, body: jsonEncode(payload));
+      final respBody = await _sakhiApi.createSakhi(payload);
       if (!mounted) return;
 
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        String resourceId = "650";
-        try {
-          final respBody = jsonDecode(response.body);
-          if (respBody['resourceId'] != null) {
-            resourceId = respBody['resourceId'].toString();
-          } else if (respBody['sakhiId'] != null) {
-            resourceId = respBody['sakhiId'].toString();
-          }
-        } catch (_) {}
+      String resourceId = respBody['resourceId']?.toString()
+          ?? respBody['sakhiId']?.toString()
+          ?? '650';
 
-        if (_sakhiPhoto != null) {
-          await _uploadDocument(_sakhiPhoto!, 'https://localhost/fineract-provider/api/v1/sakhi/$resourceId/images');
-        }
-        if (_aadharPhoto != null) {
-          await _uploadDocument(_aadharPhoto!, 'https://localhost/fineract-provider/api/v1/sakhi/$resourceId/aadhar');
-        }
-        if (_panPhoto != null) {
-          await _uploadDocument(_panPhoto!, 'https://localhost/fineract-provider/api/v1/sakhi/$resourceId/pan');
-        }
-
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Sakhi Created (ID: $resourceId) & documents uploaded!', style: const TextStyle(color: Colors.white)), backgroundColor: Colors.green),
-        );
-        
-        // Add to list and switch tabs
-        setState(() {
-          _sakhis.insert(0, {
-            'id': resourceId,
-            'name': _sakhiNameController.text.trim(),
-            'mobile': _mobileController.text.trim(),
-            'branch': _branchNameController.text.trim(),
-            'status': 'Active',
-          });
-          _tabController.animateTo(0);
-          _resetFormTokens();
-        });
-
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed: ${response.statusCode} - ${response.body}', style: const TextStyle(color: Colors.white)), backgroundColor: Colors.red),
-        );
+      if (_sakhiPhoto != null) {
+        await _sakhiApi.uploadSakhiImage(resourceId, _sakhiPhoto!);
       }
+      if (_aadharPhoto != null) {
+        await _sakhiApi.uploadAadhar(resourceId, _aadharPhoto!);
+      }
+      if (_panPhoto != null) {
+        await _sakhiApi.uploadPan(resourceId, _panPhoto!);
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Sakhi Created (ID: $resourceId) & documents uploaded!', style: const TextStyle(color: Colors.white)), backgroundColor: Colors.green),
+      );
+
+      setState(() {
+        _sakhis.insert(0, {
+          'id': resourceId,
+          'name': _sakhiNameController.text.trim(),
+          'mobile': _mobileController.text.trim(),
+          'branch': _offices.firstWhere((o) => o['id'] == _selectedOfficeId, orElse: () => {'name': 'Unknown'})['name'] ?? 'N/A',
+          'status': 'Active',
+        });
+        _tabController.animateTo(0);
+        _resetFormTokens();
+      });
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -318,7 +300,7 @@ class _SakhiCreationScreenState extends State<SakhiCreationScreen> with SingleTi
           'id': 'SK-${Random().nextInt(9000)+1000}',
           'name': _sakhiNameController.text.trim(),
           'mobile': _mobileController.text.trim(),
-          'branch': _branchNameController.text.trim(),
+          'branch': _offices.firstWhere((o) => o['id'] == _selectedOfficeId, orElse: () => {'name': 'Unknown'})['name'] ?? 'N/A',
           'status': 'Pending Sync',
         });
         _tabController.animateTo(0);
@@ -382,7 +364,7 @@ class _SakhiCreationScreenState extends State<SakhiCreationScreen> with SingleTi
   void _editSakhi(Map<String, String> sakhi, int index) {
     _sakhiNameController.text = sakhi['name'] ?? '';
     _mobileController.text = sakhi['mobile'] ?? '';
-    _branchNameController.text = sakhi['branch'] ?? 'Main Branch';
+    _selectedOfficeId = _offices.firstWhere((o) => o['name'] == sakhi['branch'], orElse: () => {'id': _selectedOfficeId})['id'];
     _tabController.animateTo(1);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Editing ${sakhi['name']}... (Submit to save updates)'), backgroundColor: AppTheme.primaryColor),
@@ -450,7 +432,7 @@ class _SakhiCreationScreenState extends State<SakhiCreationScreen> with SingleTi
         itemCount: _sakhis.length,
         itemBuilder: (context, index) {
           final sakhi = _sakhis[index];
-          final bool isPending = sakhi['status'] == 'Pending Sync';
+          final bool isPending = sakhi['status'] == 'Pending' || sakhi['status'] == 'Pending Sync';
           
           return Container(
             margin: const EdgeInsets.only(bottom: 12),
@@ -613,7 +595,19 @@ class _SakhiCreationScreenState extends State<SakhiCreationScreen> with SingleTi
                     const SizedBox(height: 24),
 
                     _buildTextField(label: 'Sakhi Name', controller: _sakhiNameController, icon: Icons.person),
-                    _buildTextField(label: 'Branch Name', controller: _branchNameController, icon: Icons.store),
+                    
+                    // Office Dropdown
+                    _buildDropdownField(
+                      label: 'Office / Branch',
+                      icon: Icons.store,
+                      value: _selectedOfficeId,
+                      items: _offices.map((o) => DropdownMenuItem(
+                        value: o['id'] as int,
+                        child: Text(o['name']?.toString() ?? 'N/A'),
+                      )).toList(),
+                      onChanged: (val) => setState(() => _selectedOfficeId = val),
+                    ),
+
                     GestureDetector(
                       onTap: () => _selectDate(context),
                       child: AbsorbPointer(
@@ -672,6 +666,31 @@ class _SakhiCreationScreenState extends State<SakhiCreationScreen> with SingleTi
                     _buildHeader('Family & Occupation'),
                     _buildTextField(label: 'Spouse Name', controller: _spouseNameController, icon: Icons.family_restroom),
                     _buildTextField(label: 'Spouse Mobile', controller: _spouseMobileController, icon: Icons.phone, isNumber: true, maxLength: 10),
+                    
+                    // Occupation Dropdown
+                    _buildDropdownField(
+                      label: 'Sakhi Occupation',
+                      icon: Icons.work,
+                      value: _occupationId,
+                      items: _professions.map((p) => DropdownMenuItem(
+                        value: p['id'] as int,
+                        child: Text(p['name']?.toString() ?? 'N/A'),
+                      )).toList(),
+                      onChanged: (val) => setState(() => _occupationId = val),
+                    ),
+
+                    // Spouse Occupation Dropdown
+                    _buildDropdownField(
+                      label: 'Spouse Occupation',
+                      icon: Icons.work_outline,
+                      value: _spouseOccupationId,
+                      items: _professions.map((p) => DropdownMenuItem(
+                        value: p['id'] as int,
+                        child: Text(p['name']?.toString() ?? 'N/A'),
+                      )).toList(),
+                      onChanged: (val) => setState(() => _spouseOccupationId = val),
+                    ),
+
                     _buildTextField(label: 'Monthly Income (₹)', controller: _monthlyIncomeController, icon: Icons.currency_rupee, isNumber: true),
                     
                     const SizedBox(height: 24),
@@ -779,6 +798,34 @@ class _SakhiCreationScreenState extends State<SakhiCreationScreen> with SingleTi
           if (value == null || value.trim().isEmpty) return 'This field is required';
           return null;
         },
+      ),
+    );
+  }
+
+  Widget _buildDropdownField({
+    required String label,
+    required IconData icon,
+    required dynamic value,
+    required List<DropdownMenuItem<int>> items,
+    required void Function(int?) onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16.0),
+      child: DropdownButtonFormField<int>(
+        value: value,
+        items: items,
+        onChanged: onChanged,
+        decoration: InputDecoration(
+          labelText: label,
+          prefixIcon: Icon(icon, color: Colors.grey[500], size: 20),
+          filled: true,
+          fillColor: Colors.grey[50],
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey[200]!)),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppTheme.primaryColor, width: 1.5)),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        ),
+        validator: (value) => value == null ? 'Please select an option' : null,
       ),
     );
   }

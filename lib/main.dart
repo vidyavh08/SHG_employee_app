@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'config/env_config.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/survey_hub_screen.dart';
 import 'screens/groups_screen.dart';
@@ -9,8 +11,9 @@ import 'screens/profile_screen.dart';
 import 'theme/app_theme.dart';
 import 'screens/login_screen.dart';
 import 'screens/sakhi_creation_screen.dart';
+import 'services/auth_session.dart';
 
-class MyHttpOverrides extends HttpOverrides {
+class _DevHttpOverrides extends HttpOverrides {
   @override
   HttpClient createHttpClient(SecurityContext? context) {
     return super.createHttpClient(context)
@@ -18,15 +21,23 @@ class MyHttpOverrides extends HttpOverrides {
   }
 }
 
-void main() {
-  HttpOverrides.global = MyHttpOverrides();
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await dotenv.load(fileName: '.env');
+
+  if (EnvConfig.isDevMode) {
+    HttpOverrides.global = _DevHttpOverrides();
+  }
+
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.light,
     ),
   );
+
+  await AuthSession.instance.init();
+
   runApp(const EmployeeApp());
 }
 
@@ -39,7 +50,9 @@ class EmployeeApp extends StatelessWidget {
       title: 'SHG Employee App',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
-      home: const LoginScreen(),
+      home: AuthSession.instance.isLoggedIn
+          ? const MainNavigation()
+          : const LoginScreen(),
     );
   }
 }
