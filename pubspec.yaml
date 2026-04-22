@@ -1,7 +1,7 @@
 name: employee_app
 description: SHG Employee Collection App for microfinance field officers.
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.2+3
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -42,6 +42,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.13.1
 
 flutter:
   uses-material-design: true
@@ -63,3 +64,11 @@ flutter:
   assets:
     - .env
   #   - assets/images/
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/images/app_logo.jpg"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/images/app_logo.jpg"
+  min_sdk_android: 21
